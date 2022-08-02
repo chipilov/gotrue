@@ -26,6 +26,19 @@ type GoTrueClaims struct {
 	AppMetaData  map[string]interface{} `json:"app_metadata"`
 	UserMetaData map[string]interface{} `json:"user_metadata"`
 	Role         string                 `json:"role"`
+
+	Provider GoTrueProviderClaim `json:"provider,omitempty"`
+}
+
+// GoTrueProviderClaim encodes information about the source of the identity
+// encoded by a JWT. It's typically only present on federated identities (from
+// Google, Twitter, SAML).
+type GoTrueProviderClaim struct {
+	Type string `json:"type"`
+	ID   string `json:"id,omitempty"`
+
+	SAMLEntityID    string `json:"entity_id,omitempty"`
+	SAMLInitiatedBy string `json:"initiated_by,omitempty"`
 }
 
 // AccessTokenResponse represents an OAuth2 success response
@@ -228,7 +241,7 @@ func (a *API) ResourceOwnerPasswordGrant(ctx context.Context, w http.ResponseWri
 			return terr
 		}
 
-		token, terr = a.issueRefreshToken(ctx, tx, user)
+		token, terr = a.issueRefreshToken(ctx, tx, user, nil)
 		if terr != nil {
 			return terr
 		}
@@ -512,7 +525,7 @@ func (a *API) IdTokenGrant(ctx context.Context, w http.ResponseWriter, r *http.R
 			}
 		}
 
-		token, terr = a.issueRefreshToken(ctx, tx, user)
+		token, terr = a.issueRefreshToken(ctx, tx, user, nil)
 		if terr != nil {
 			return oauthError("server_error", terr.Error())
 		}
@@ -549,7 +562,7 @@ func generateAccessToken(user *models.User, expiresIn time.Duration, secret stri
 	return token.SignedString([]byte(secret))
 }
 
-func (a *API) issueRefreshToken(ctx context.Context, conn *storage.Connection, user *models.User) (*AccessTokenResponse, error) {
+func (a *API) issueRefreshToken(ctx context.Context, conn *storage.Connection, user *models.User, cond *models.GrantAuthenticatedConditions) (*AccessTokenResponse, error) {
 	config := a.getConfig(ctx)
 
 	now := time.Now()
@@ -560,7 +573,7 @@ func (a *API) issueRefreshToken(ctx context.Context, conn *storage.Connection, u
 
 	err := conn.Transaction(func(tx *storage.Connection) error {
 		var terr error
-		refreshToken, terr = models.GrantAuthenticatedUser(tx, user)
+		refreshToken, terr = models.GrantAuthenticatedUser(tx, user, cond)
 		if terr != nil {
 			return internalServerError("Database error granting user").WithInternalError(terr)
 		}

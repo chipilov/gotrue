@@ -22,6 +22,8 @@ type RefreshToken struct {
 
 	Parent storage.NullString `db:"parent"`
 
+	SSOSessionID uuid.UUID `db:"sso_session_id"`
+
 	Revoked   bool      `db:"revoked"`
 	CreatedAt time.Time `db:"created_at"`
 	UpdatedAt time.Time `db:"updated_at"`
@@ -32,9 +34,17 @@ func (RefreshToken) TableName() string {
 	return tableName
 }
 
+// GrantAuthenticatedParams signals the parameters for gran
+type GrantAuthenticatedConditions struct {
+	SSOProviderID       uuid.UUID
+	NotBefore           time.Time
+	NotAfter            time.Time
+	InitiatedByProvider bool
+}
+
 // GrantAuthenticatedUser creates a refresh token for the provided user.
-func GrantAuthenticatedUser(tx *storage.Connection, user *User) (*RefreshToken, error) {
-	return createRefreshToken(tx, user, nil)
+func GrantAuthenticatedUser(tx *storage.Connection, user *User, cond *GrantAuthenticatedConditions) (*RefreshToken, error) {
+	return createRefreshToken(tx, user, nil, cond)
 }
 
 // GrantRefreshTokenSwap swaps a refresh token for a new one, revoking the provided token.
@@ -50,7 +60,7 @@ func GrantRefreshTokenSwap(tx *storage.Connection, user *User, token *RefreshTok
 		if terr = tx.UpdateOnly(token, "revoked"); terr != nil {
 			return terr
 		}
-		newToken, terr = createRefreshToken(rtx, user, token)
+		newToken, terr = createRefreshToken(rtx, user, token, nil)
 		return terr
 	})
 	return newToken, err
@@ -90,7 +100,7 @@ func Logout(tx *storage.Connection, instanceID uuid.UUID, id uuid.UUID) error {
 	return tx.RawQuery("DELETE FROM "+(&pop.Model{Value: RefreshToken{}}).TableName()+" WHERE instance_id = ? AND user_id = ?", instanceID, id).Exec()
 }
 
-func createRefreshToken(tx *storage.Connection, user *User, oldToken *RefreshToken) (*RefreshToken, error) {
+func createRefreshToken(tx *storage.Connection, user *User, oldToken *RefreshToken, cond *GrantAuthenticatedConditions) (*RefreshToken, error) {
 	token := &RefreshToken{
 		InstanceID: user.InstanceID,
 		UserID:     user.ID,
@@ -99,6 +109,24 @@ func createRefreshToken(tx *storage.Connection, user *User, oldToken *RefreshTok
 	}
 	if oldToken != nil {
 		token.Parent = storage.NullString(oldToken.Token)
+		token.SSOSessionID = oldToken.SSOSessionID
+	}
+
+	if cond != nil {
+		ssoSession := SSOSession{
+			UserID:        user.ID,
+			SSOProviderID: cond.SSOProviderID,
+
+			IdPInitiated: cond.InitiatedByProvider,
+			NotBefore:    cond.NotBefore,
+			NotAfter:     cond.NotAfter,
+		}
+
+		if err := tx.Create(&ssoSession); err != nil {
+			return nil, errors.Wrap(err, "error creating SSO session")
+		}
+
+		token.SSOSessionID = ssoSession.ID
 	}
 
 	if err := tx.Create(token); err != nil {

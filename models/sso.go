@@ -58,6 +58,25 @@ func (d SSODomain) TableName() string {
 	return "sso_domains"
 }
 
+type SSOSession struct {
+	ID uuid.UUID `db:"id"`
+
+	UserID        uuid.UUID `db:"user_id"`
+	SSOProviderID uuid.UUID `db:"sso_provider_id"`
+
+	NotBefore time.Time `db:"not_before"`
+	NotAfter  time.Time `db:"not_after"`
+
+	IdPInitiated bool `db:"idp_initiated"`
+
+	CreatedAt time.Time `db:"created_at" json:"-"`
+	UpdatedAt time.Time `db:"updated_at" json:"-"`
+}
+
+func (s SSOSession) TableName() string {
+	return "sso_sessions"
+}
+
 func FindSSOProviderForEmailAddress(tx *storage.Connection, emailAddress string) (*SSOProvider, error) {
 	parts := strings.Split(emailAddress, "@")
 	emailDomain := parts[1]
